@@ -1,0 +1,52 @@
+# ==============================================================================
+# Gitignore for the Diffusion Trajectory Planner Project
+# ==============================================================================
+
+
+# --- Model Files ---
+# Model checkpoints and normalization stats are generated artifacts, not source code.
+models/checkpoints/
+models/normalization_stats.pt
+
+# --- Logs and Runs ---
+# TensorBoard logs and run artifacts can be very large.
+runs/
+
+# --- Python Cache and Environment Files ---
+# Standard Python temporary files and virtual environment folders.
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# --- IDE and OS-specific Files ---
+# Ignore configuration files from common editors and operating systems.
+.vscode/
+.history/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# --- Jupyter Notebook Checkpoints ---
+# Ignore the hidden checkpoints directory created by Jupyter.
+.ipynb_checkpoints/
+
+# --- Local Secrets ---
+# A good practice is to have a file for secrets (like API keys) that is ignored.
+# While we don't have one now, it's a good habit to include it.
+.env
+secrets.yaml
+
+# --- Temporary Test/Asset Files (if any) ---
+# If you have an `assets` folder for README images, you might want to un-ignore it
+# like this, while ignoring other temp files.
+# !assets/qualitative_result.png

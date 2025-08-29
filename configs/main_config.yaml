@@ -1,0 +1,116 @@
+# ==============================================================================
+# main_config.yaml for The Modern Virtuoso (Diffusion Policy) Project
+# ==============================================================================
+
+# --- Path Configurations ---
+# Absolute paths to your data directories.
+# These should point to the outputs of your previous "Long-Tail" project.
+data:
+  # Path to the .npz files created by your original parser.py
+  processed_npz_dir: "/mnt/d/waymo_datasets/waymo_longtail_rl_data/processed_npz"
+  
+  # The output directory for this project's featurizer script.
+  featurized_dir: "/mnt/d/waymo_datasets/modern_virtuoso_data/featurized_v3_diffusion"
+  featurized_dir_onlyxy: "/mnt/d/waymo_datasets/modern_virtuoso_data/featurized_v3_diffusion_onlyxy"
+
+  # Number of parallel workers for the featurizer_diffusion.py script
+  num_workers: 16
+
+# --- Feature Engineering Configurations ---
+# These parameters MUST match the ones used in your previous project to ensure
+# the FeatureExtractor behaves identically.
+features:
+  num_agents: 16
+  num_map_polylines: 64
+  map_points_per_polyline: 10
+  num_goal_points: 5
+
+  # NEW: Parameters for the "Gating and Ranking" agent selection logic.
+  relevance:
+    # Stage 1: Gating - Only consider agents within this box in the ego-centric frame.
+    # How far ahead to look for relevant agents (e.g., ~8 seconds at 10 m/s).
+    max_longitudinal_dist: 80.0
+    # How far behind to look (important for lane changes, being cut off).
+    max_longitudinal_dist_behind: 15.0
+    # How far to the side to look (e.g., ~2-3 lanes wide).
+    max_lateral_dist: 30.0
+
+  # NEW: Filter for static scenarios
+  min_displacement_threshold: 1.0 # Min distance (m) the SDC must travel over the 9s window to be included.
+  # NEW: Data quality filter for the SDC track
+  max_consecutive_invalid_steps: 4 # Max number of consecutive invalid timesteps for the SDC to be kept.
+  # NEW: Parked vehicle filter for other agents
+  parked_vehicle_speed_threshold: 0.5 # Max speed (m/s) for an agent to be considered parked.
+
+
+# --- Trajectory & Time Horizon Configurations ---
+# Defines the core prediction task.
+trajectory:
+  history_sec: 1.0       # How many seconds of history to use for context (t=0 to t=10)
+  future_sec: 8.0        # How many seconds into the future to predict (t=11 to t=90)
+  dt: 0.1                # Timestep duration in seconds (10 Hz)
+
+  # Calculated values (do not change unless you change the above)
+  # history_steps = history_sec / dt + 1 = 11 steps (indices 0-10)
+  # future_steps = future_sec / dt = 80 steps
+
+# --- Diffusion Model Configurations ---
+diffusion:
+  num_diffusion_steps: 500 # T in the DDPM paper. Common values: 100, 200, 1000
+  beta_schedule: 'cosine'  # Options: 'linear', 'cosine'
+  beta_start: 0.0001
+  beta_end: 0.02
+
+# --- Model Architecture Configurations ---
+# Defines the structure of the ConditionalUNet and its components.
+model:
+  # Input/Output dimensions for the trajectory
+  # trajectory_dim: 3 # [x, y, heading]
+  trajectory_dim: 2 # [x, y]
+
+  # Time embedding
+  time_embed_dim: 128
+  
+  # Scene (State) embedding
+  scene_embed_dim: 256
+  
+  # U-Net architecture
+  down_dims: [128, 256, 512] # Feature dimensions for each downsampling level
+
+
+
+# --- Training Configurations ---
+training:
+  device: 'cuda'
+  learning_rate: 1.0e-4
+  weight_decay: 1.0e-6
+
+  # Increased batch size to maximize VRAM utilization on the RTX 3090.
+  batch_size: 512
+  
+  # A solid training target.
+  num_train_steps: 300000 
+  
+  # Data loading workers, tuned for a modern CPU.
+  num_workers: 10
+  
+  # Logging and Checkpointing intervals
+  log_interval_steps: 50
+  eval_interval_steps: 500
+
+  scheduler:
+    # Type of scheduler to use. 'cosine' is a strong default.
+    type: 'cosine'
+    # The number of steps in the first restart cycle. A good starting point is
+    # a fraction of the total training steps, e.g., 1/10th or 1/5th.
+    T_0: 50000 
+    # The factor by which to increase the cycle length after each restart. T_mult > 1
+    # means the cycles get longer over time.
+    T_mult: 1
+    # The minimum learning rate to decay to.
+    eta_min: 1.0e-7
+
+# --- Evaluation Configurations ---
+evaluation:
+  # How many trajectories to generate per scenario to measure multi-modality
+  k_samples: 5 
