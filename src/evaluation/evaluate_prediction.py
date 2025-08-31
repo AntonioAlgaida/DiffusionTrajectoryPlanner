@@ -7,6 +7,12 @@ This script loads a trained model checkpoint and evaluates its performance on th
 unseen validation set using multi-modal prediction metrics.
 
 It supports both DDPM and the faster DDIM sampling methods.
+
+To run:
+conda activate virtuoso_env
+python -m src.evaluation.evaluate_prediction --checkpoint runs/DiffusionPolicy_Training/20250829_142341/checkpoints/best_model.pth  --sampler ddim --steps 50
+python -m src.evaluation.evaluate_prediction --checkpoint runs/DiffusionPolicy_Training/20250829_142341/checkpoints/best_model.pth  --sampler ddpm
+
 """
 
 import os
@@ -138,35 +144,40 @@ def sample_ddpm(model, state_dict, shape, schedule, device):
 def sample_ddim(model, state_dict, shape, num_steps, schedule, device):
     """
     Performs the fast, deterministic DDIM sampling process.
+    --- UPGRADED: Uses a more numerically stable update step. ---
     """
+    batch_size = shape[0]
+    total_steps = schedule['betas'].shape[0]
+    
     # Create the DDIM timestep sequence
-    times = torch.linspace(-1, schedule['betas'].shape[0] - 1, steps=num_steps + 1).long().to(device)
+    times = torch.linspace(-1, total_steps - 1, steps=num_steps + 1).long()
     times = list(reversed(times.tolist()))
     time_pairs = list(zip(times[:-1], times[1:]))
     
-    # Start with random noise
     x_t = torch.randn(shape, device=device)
-    
+
     for time, time_next in time_pairs:
-        # Get the alpha for the current and next timesteps
-        alpha_next = schedule['alphas_cumprod'][time_next if time_next >= 0 else 0]
+        # Prepare the timestep tensor
+        time_cond = torch.full((batch_size,), time, device=device, dtype=torch.long)
         
-        # Create the timestep tensor for the model
-        time_cond = torch.full((shape[0],), time, device=device, dtype=torch.long)
-        
-        # Predict the noise
+        # Predict the noise `epsilon` for the current step `t`
         pred_noise = model(x_t, time_cond, state_dict)
         
-        # Predict the clean trajectory (x_0)
-        sqrt_alpha_t = schedule['sqrt_alphas_cumprod'][time]
-        sqrt_one_minus_alpha_t = schedule['sqrt_one_minus_alphas_cumprod'][time]
-        x_0_pred = (x_t - sqrt_one_minus_alpha_t * pred_noise) / sqrt_alpha_t
+        # Get the schedule constants for the current and next timesteps
+        alpha_t = schedule['alphas_cumprod'][time]
+        alpha_next = schedule['alphas_cumprod'][time_next] if time_next >= 0 else torch.tensor(1.0, device=device)
+
+        # --- THIS IS THE ROBUST DDIM UPDATE EQUATION ---
+        # 1. Predict the final clean sample x_0 using the noise prediction
+        pred_x0 = (x_t - torch.sqrt(1. - alpha_t) * pred_noise) / torch.sqrt(alpha_t)
+
+        # Optional: Clip the predicted x_0 to be in the valid data range
+        # This is a key technique for stabilizing DDIM.
+        pred_x0 = torch.clamp(pred_x0, -1.0, 1.0)
         
-        # Calculate the direction pointing to x_t
-        dir_xt = torch.sqrt(1. - alpha_next) * pred_noise
-        
-        # Calculate the next noisy trajectory x_{t-1}
-        x_t = torch.sqrt(alpha_next) * x_0_pred + dir_xt
+        # 2. Calculate the final x_{t-1} using the predicted x_0
+        # This formulation is less prone to exploding.
+        x_t = torch.sqrt(alpha_next) * pred_x0 + torch.sqrt(1. - alpha_next) * pred_noise
         
     return x_t
 
@@ -226,7 +237,7 @@ def main(args):
     
     # --- Load Data ---
     val_files = glob(os.path.join(config['data']['featurized_dir_onlyxy'], 'validation', '*.pt'))
-    val_dataset = InMemoryDiffusionDataset(val_files[:10], stats_path=stats_path)  # <-- Limiting to 10 samples for quick testing
+    val_dataset = InMemoryDiffusionDataset(val_files[:100], stats_path=stats_path)  # <-- Limiting to 10 samples for quick testing
     val_loader = DataLoader(val_dataset, batch_size=1, collate_fn=custom_collate_fn)
     
     # --- Prepare for Evaluation ---

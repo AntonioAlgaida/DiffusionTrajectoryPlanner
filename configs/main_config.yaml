@@ -69,13 +69,13 @@ model:
   trajectory_dim: 2 # [x, y]
 
   # Time embedding
-  time_embed_dim: 128
+  time_embed_dim: 16
   
   # Scene (State) embedding
-  scene_embed_dim: 256
+  scene_embed_dim: 16
   
   # U-Net architecture
-  down_dims: [128, 256, 512] # Feature dimensions for each downsampling level
+  down_dims: [16, 32, 64] # Feature dimensions for each downsampling level
 
 
 
@@ -83,7 +83,7 @@ model:
 training:
   device: 'cuda'
   learning_rate: 1.0e-4
-  weight_decay: 1.0e-6
+  weight_decay: 0.03
 
   # Increased batch size to maximize VRAM utilization on the RTX 3090.
   batch_size: 512
@@ -103,7 +103,7 @@ training:
     type: 'cosine'
     # The number of steps in the first restart cycle. A good starting point is
     # a fraction of the total training steps, e.g., 1/10th or 1/5th.
-    T_0: 50000 
+    T_0: 100000 
     # The factor by which to increase the cycle length after each restart. T_mult > 1
     # means the cycles get longer over time.
     T_mult: 1
@@ -113,4 +113,8 @@ training:
 # --- Evaluation Configurations ---
 evaluation:
   # How many trajectories to generate per scenario to measure multi-modality
-  k_samples: 5 
+  k_samples: 6
+
+# NEW: Configuration for PCA latent space
+pca:
+  n_components: 16 # Number of principal components to keep

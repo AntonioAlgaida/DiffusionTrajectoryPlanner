@@ -31,8 +31,7 @@ from datetime import datetime
 import yaml
 import itertools
 from typing import Dict, Any, Tuple
-from tqdm import tqdm
-
+import argparse
 # Add project root to Python path
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.append(PROJECT_ROOT)
@@ -81,7 +80,7 @@ def move_batch_to_device(batch: Dict[str, Any], device: torch.device) -> Dict[st
 # === Main Training Logic ======================================================
 # ==============================================================================
 
-def main():
+def main(args):
     # --- 1. Setup and Configuration ---
     config = load_config(os.path.join(PROJECT_ROOT, 'configs/main_config.yaml'))
     train_cfg = config['training']
@@ -89,9 +88,13 @@ def main():
     device = torch.device(train_cfg['device'] if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
 
-    # Create a unique directory for this run
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    run_dir = os.path.join(PROJECT_ROOT, 'runs', 'DiffusionPolicy_Training', timestamp)
+    # Create a unique directory for this runc
+    if args.resume_from_checkpoint:
+        run_dir = os.path.dirname(os.path.dirname(args.resume_from_checkpoint))
+    else:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        run_dir = os.path.join(PROJECT_ROOT, 'runs', 'DiffusionPolicy_Training', timestamp)
+        
     os.makedirs(run_dir, exist_ok=True)
     checkpoints_dir = os.path.join(run_dir, 'checkpoints')
     os.makedirs(checkpoints_dir, exist_ok=True)
@@ -152,15 +155,27 @@ def main():
         scheduler = None # No scheduler
         print("Not using a learning rate scheduler.")
         
+    start_step = 0
+    best_val_loss = float('inf')
+    if args.resume_from_checkpoint:
+        print(f"--- Resuming training from checkpoint: {args.resume_from_checkpoint} ---")
+        checkpoint = torch.load(args.resume_from_checkpoint, map_location=device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        start_step = checkpoint['step'] + 1
+        best_val_loss = checkpoint.get('loss', float('inf')) # Use .get for old checkpoints
+        if scheduler and 'scheduler_state_dict' in checkpoint:
+             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        print(f"Resuming from step {start_step} with best validation loss {best_val_loss:.6f}")
+        
     print(f"Model has {sum(p.numel() for p in model.parameters())/1e6:.2f}M parameters.")
 
     # --- 5. The Main Training Loop (Corrected for InMemoryDataset) ---
     print("Starting training...")
-    best_val_loss = float('inf')
-    global_step = 0
     
     # Use a progress bar that tracks the total number of steps
-    progress_bar = tqdm(total=train_cfg['num_train_steps'], desc="Training Steps")
+    progress_bar = tqdm(total=train_cfg['num_train_steps'], initial=start_step, desc="Training Steps")
+    global_step = start_step
 
     # The outer loop is just to ensure we keep training until we hit the target step count
     while global_step < train_cfg['num_train_steps']:
@@ -233,12 +248,18 @@ def main():
                 if avg_val_loss < best_val_loss:
                     best_val_loss = avg_val_loss
                     best_checkpoint_path = os.path.join(checkpoints_dir, 'best_model.pth')
-                    torch.save({
+                    save_dict = {
                         'step': global_step,
                         'model_state_dict': model.state_dict(),
                         'optimizer_state_dict': optimizer.state_dict(),
                         'loss': best_val_loss,
-                    }, best_checkpoint_path)
+                    }
+                    if scheduler is not None:
+                        save_dict['scheduler_state_dict'] = scheduler.state_dict()
+                    
+                    torch.save(save_dict, best_checkpoint_path)
+
+                        
                     tqdm.write(f"Step {global_step}: New best model saved with validation loss {avg_val_loss:.6f}")
 
             # --- 5.7. Update Counters ---
@@ -255,4 +276,10 @@ def main():
     print(f"Final model saved to {final_model_path}")
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--resume_from_checkpoint', type=str, default=None,
+        help='Path to a model checkpoint to resume training from.'
+    )
+    args = parser.parse_args()
+    main(args)

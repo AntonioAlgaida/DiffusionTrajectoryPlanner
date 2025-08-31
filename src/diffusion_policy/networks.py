@@ -106,7 +106,7 @@ class StateEncoder(nn.Module):
     Processes the structured state_dict into a single scene embedding vector
     using dedicated encoders for each entity and a Transformer for fusion.
     """
-    def __init__(self, embed_dim: int, num_attn_heads: int = 8):
+    def __init__(self, embed_dim: int, num_attn_heads: int = 4):
         super().__init__()
         
         # --- Define dedicated encoders for each entity type ---
@@ -188,6 +188,10 @@ class StateEncoder(nn.Module):
             state_dict['goal_mask'],
             state_dict['traffic_lights_mask'] # This is shape (B, 1)
         ], dim=1)
+        
+        # Sequence length of `full_sequence` should now match `full_mask`.
+        assert full_sequence.shape[1] == full_mask.shape[1], \
+            f"Shape mismatch! Sequence length {full_sequence.shape[1]} != Mask length {full_mask.shape[1]}"
 
         # --- 4. Pass through the Transformer ---
         transformer_output = self.transformer(src=full_sequence, src_key_padding_mask=~full_mask)
