@@ -9,6 +9,7 @@ from typing import List, Dict, Any
 import numpy as np
 from tqdm import tqdm
 import multiprocessing
+import pickle
 
 # ==============================================================================
 # === Top-Level Helper Functions (for Multiprocessing & DataLoader) ============
@@ -59,13 +60,18 @@ class InMemoryDiffusionDataset(Dataset):
     A dataset that pre-loads all samples into RAM for maximum training speed.
     Uses multiprocessing for fast, parallel caching.
     """
-    def __init__(self, file_paths: List[str], stats_path: str):
+    def __init__(self, file_paths: List[str], stats_path: str, pca_path: str, latent_stats_path: str):
         super().__init__()
         if not file_paths:
             raise ValueError("No file paths provided to the dataset.")
+        # file_paths = file_paths[:1000]
         
-        self.stats = torch.load(stats_path)
-        print("Loaded normalization stats.")
+        # Load all necessary tools: trajectory stats, PCA model, and latent stats
+        self.traj_stats = torch.load(stats_path)
+        with open(pca_path, 'rb') as f:
+            self.pca = pickle.load(f)
+        self.latent_stats = torch.load(latent_stats_path)
+        print("Loaded trajectory stats, PCA model, and latent stats.")
         
         print(f"Loading {len(file_paths)} samples into memory using parallel workers...")
         num_workers = os.cpu_count()
@@ -81,10 +87,27 @@ class InMemoryDiffusionDataset(Dataset):
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         sample = self.data_cache[idx]
-        normalized_sample = {
+        
+        # --- The Full, Correct Transformation Pipeline ---
+        # 1. Meters -> Normalized Trajectory [-1, 1]
+        trajectory_normalized = normalize_trajectory(
+            torch.from_numpy(sample['target_trajectory'][:, :2]), self.traj_stats
+        )
+        
+        # 2. Normalized Trajectory -> PCA Latent Vector (unbounded)
+        trajectory_flat = trajectory_normalized.flatten().unsqueeze(0).numpy()
+        latent_vector = self.pca.transform(trajectory_flat)
+        latent_vector_torch = torch.from_numpy(latent_vector).squeeze(0).float()
+        
+        # 3. PCA Latent Vector -> Normalized Latent Vector [-1, 1]
+        # We need a new normalize_latent helper function
+        target_latent_normalized = normalize_latent(latent_vector_torch, self.latent_stats)
+        
+        return {
             'state': sample['state'],
-            'target_trajectory': normalize_trajectory(
-                torch.from_numpy(sample['target_trajectory']), self.stats
-            ).float()
+            'target_trajectory': target_latent_normalized
         }
-        return normalized_sample
+
+def normalize_latent(latent_vector, stats):
+    """Normalizes a latent vector to the [-1, 1] range."""
+    return 2 * (latent_vector - stats['min']) / (stats['max'] - stats['min']) - 1

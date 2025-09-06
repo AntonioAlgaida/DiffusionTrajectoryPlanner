@@ -24,7 +24,7 @@ CHECKPOINT_PATH="${LATEST_RUN_DIR}checkpoints/best_model.pth"
 
 # Define the DDIM step counts you want to evaluate.
 # You can easily add or remove values from this list.
-DDIM_STEPS=(10 20 30 50 100 150 200)
+DDIM_STEPS=(10 20 30 50)
 
 # --- Pre-flight Checks ---
 

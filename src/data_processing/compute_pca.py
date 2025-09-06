@@ -115,12 +115,29 @@ def main():
     print(f"This means our {n_components}-dimensional latent space captures "
           f"{explained_variance:.2%} of the variance of the original data.")
 
-    # --- 5. Save the Fitted PCA Model ---
-    output_path = os.path.join(PROJECT_ROOT, 'models', 'trajectory_pca.pkl')
-    with open(output_path, 'wb') as f:
-        pickle.dump(pca, f)
+    print("Transforming all data to the latent space to compute normalization stats...")
+    # Transform the original data matrix into latent vectors
+    latent_vectors = pca.transform(data_matrix)
     
-    print(f"\nFitted PCA model saved to: {output_path}")
+    # Now, find the min and max of these latent vectors
+    latent_min = np.min(latent_vectors, axis=0)
+    latent_max = np.max(latent_vectors, axis=0)
+    
+    latent_stats = {
+        'min': torch.from_numpy(latent_min),
+        'max': torch.from_numpy(latent_max)
+    }
 
+    # --- 5. Save BOTH the PCA Model AND the Latent Stats ---
+    # Save the PCA model
+    output_path_pca = os.path.join(PROJECT_ROOT, 'models', 'trajectory_pca.pkl')
+    with open(output_path_pca, 'wb') as f:
+        pickle.dump(pca, f)
+    print(f"\nFitted PCA model saved to: {output_path_pca}")
+    
+    # Save the new latent stats
+    output_path_latent_stats = os.path.join(PROJECT_ROOT, 'models', 'latent_stats.pt')
+    torch.save(latent_stats, output_path_latent_stats)
+    print(f"Latent space normalization stats saved to: {output_path_latent_stats}")
 if __name__ == '__main__':
     main()

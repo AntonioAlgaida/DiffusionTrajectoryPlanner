@@ -164,7 +164,7 @@ def process_shard(npz_path: str) -> bool:
         }
 
         output_subdir = os.path.basename(os.path.dirname(npz_path)) # 'training' or 'validation'
-        output_dir = os.path.join(CONFIG['data']['featurized_dir_onlyxy'], output_subdir)
+        output_dir = os.path.join(CONFIG['data']['featurized_v3_final_waypoint'], output_subdir)
         os.makedirs(output_dir, exist_ok=True)
         
         output_path = os.path.join(output_dir, f"{scenario_id}.pt")
@@ -184,7 +184,7 @@ def main():
     global CONFIG
     CONFIG = load_config(config_path)
 
-    output_dir = CONFIG['data']['featurized_dir_onlyxy']
+    output_dir = CONFIG['data']['featurized_v3_final_waypoint']
     npz_base_dir = CONFIG['data']['processed_npz_dir']
     all_npz_paths = glob(os.path.join(npz_base_dir, '*', '*.npz'))
 

@@ -12,6 +12,7 @@ data:
   # The output directory for this project's featurizer script.
   featurized_dir: "/mnt/d/waymo_datasets/modern_virtuoso_data/featurized_v3_diffusion"
   featurized_dir_onlyxy: "/mnt/d/waymo_datasets/modern_virtuoso_data/featurized_v3_diffusion_onlyxy"
+  featurized_v3_final_waypoint: "/mnt/d/waymo_datasets/modern_virtuoso_data/featurized_v3_final_waypoint"
 
   # Number of parallel workers for the featurizer_diffusion.py script
   num_workers: 16
@@ -42,6 +43,13 @@ features:
   # NEW: Parked vehicle filter for other agents
   parked_vehicle_speed_threshold: 0.5 # Max speed (m/s) for an agent to be considered parked.
 
+  # --- NEW: Selectable Goal Representation ---
+  # Defines the method used to extract the goal signal.
+  # Options:
+  #   'sparse_route': The current method. A sequence of 5 waypoints from the future route (1s, 2s, ..., 5s).
+  #   'final_waypoint': A single waypoint representing the final destination at the 8-second horizon.
+  goal_representation: 'final_waypoint'
+
 
 # --- Trajectory & Time Horizon Configurations ---
 # Defines the core prediction task.
@@ -69,13 +77,20 @@ model:
   trajectory_dim: 2 # [x, y]
 
   # Time embedding
-  time_embed_dim: 16
+  time_embed_dim: 128
   
   # Scene (State) embedding
-  scene_embed_dim: 16
+  scene_embed_dim: 256
   
-  # U-Net architecture
-  down_dims: [16, 32, 64] # Feature dimensions for each downsampling level
+  # These parameters are for the MLP denoiser core.
+  # A list of hidden layer sizes. This defines a 3-hidden-layer MLP.
+  hidden_dims: [512, 512, 512]
+
+  # NEW: Ablation parameter for goal conditioning
+  # Probability of dropping the goal embedding during training.
+  # Set to 0.0 to always use the goal (standard training).
+  # Set to a value like 0.1 to train a more robust model.
+  goal_dropout_prob: 0.1
 
 
 

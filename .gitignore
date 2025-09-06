@@ -50,3 +50,5 @@ secrets.yaml
 # If you have an `assets` folder for README images, you might want to un-ignore it
 # like this, while ignoring other temp files.
 # !assets/qualitative_result.png
+models/latent_stats.pt
+models/trajectory_pca.pkl

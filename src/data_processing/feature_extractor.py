@@ -22,8 +22,10 @@ class FeatureExtractor:
     def __init__(self, config: Dict):
         self.features_config = config['features']
         self.relevance_config = config['features']['relevance']
+        self.goal_representation = config['features'].get('goal_representation', 'sparse_route')
+
         # self.map_config = config.get('map', {})
-        print("FeatureExtractor (V4 - Diffusion Policy) initialized.")
+        print(f"FeatureExtractor (V4 - Diffusion Policy) initialized using goal representation: '{self.goal_representation}'")
         
     def extract_features(
         self, 
@@ -317,32 +319,50 @@ class FeatureExtractor:
         return tl_features, tl_mask
         
     def _get_goal_features(self, sdc_route: np.ndarray, current_timestep: int, ego_pose: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """Extracts future waypoints from the expert's route as the goal."""
+        """
+        --- UPGRADED METHOD ---
+        Extracts the goal based on the configured representation method.
+        """
         num_goal_points = self.features_config.get('num_goal_points', 5)
-        horizon_seconds = np.arange(1, num_goal_points+1)
-        horizon_steps = (horizon_seconds * 10).astype(int)
-        # Feature: just the ego-centric (x, y) coordinates of the goal points
         feature_dim = 2
         
         goal_features = np.zeros((num_goal_points, feature_dim), dtype=np.float32)
         goal_mask = np.zeros(num_goal_points, dtype=bool)
 
-        target_timesteps = current_timestep + horizon_steps
-        # Create a boolean mask of which future timesteps are valid (i.e., within the scenario bounds)
-        valid_mask = target_timesteps < sdc_route.shape[0]
-        
-        valid_target_timesteps = target_timesteps[valid_mask]
-        if len(valid_target_timesteps) == 0:
-            return goal_features, goal_mask
+        if self.goal_representation == 'sparse_route':
+            # This is our original, proven logic
+            horizon_seconds = np.arange(1, num_goal_points + 1)
+            horizon_steps = (horizon_seconds * 10).astype(int)
+            target_timesteps = current_timestep + horizon_steps
 
-        # Get global waypoints and transform them to the ego-centric frame
-        future_waypoints_global = sdc_route[valid_target_timesteps, :2]
-        future_waypoints_ego = geometry.transform_points(future_waypoints_global, ego_pose)
+            valid_mask = target_timesteps < sdc_route.shape[0]
+            valid_target_timesteps = target_timesteps[valid_mask]
+            if len(valid_target_timesteps) == 0:
+                return goal_features, goal_mask
+
+            future_waypoints_global = sdc_route[valid_target_timesteps, :2]
+            future_waypoints_ego = geometry.transform_points(future_waypoints_global, ego_pose)
+            
+            goal_features[valid_mask, :] = future_waypoints_ego
+            goal_mask[valid_mask] = True
+
+        elif self.goal_representation == 'final_waypoint':
+            # This is the new logic for the ablation study
+            final_timestep = current_timestep + 80 # 8-second horizon
+
+            if final_timestep < sdc_route.shape[0]:
+                # Get the single final waypoint
+                final_waypoint_global = sdc_route[final_timestep, :2].reshape(1, 2)
+                final_waypoint_ego = geometry.transform_points(final_waypoint_global, ego_pose)
+                
+                # To maintain architectural consistency, we place this single goal
+                # in the first slot of our (5, 2) goal tensor.
+                goal_features[0, :] = final_waypoint_ego
+                goal_mask[0] = True
         
-        # Populate the feature tensor only for the valid future points
-        goal_features[valid_mask, :] = future_waypoints_ego
-        goal_mask[valid_mask] = True
-        
+        else:
+            raise ValueError(f"Unknown goal_representation: '{self.goal_representation}'")
+            
         return goal_features, goal_mask
     
     def _classify_parked_vehicles(self, source_data: Dict) -> np.ndarray:

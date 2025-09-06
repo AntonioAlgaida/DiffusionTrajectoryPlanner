@@ -37,7 +37,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..
 sys.path.append(PROJECT_ROOT)
 
 from src.utils.config import load_config
-from src.diffusion_policy.networks import ConditionalUNet
+from src.diffusion_policy.networks import ConditionalUNet, ConditionalMLPDenoiser
 from src.diffusion_policy.dataset import InMemoryDiffusionDataset, custom_collate_fn 
 
 # ==============================================================================
@@ -119,13 +119,15 @@ def main(args):
 
     # --- 3. Load Data using In-Memory Caching ---
     print("--- Loading and Caching Data ---")
-    featurized_dir = config['data']['featurized_dir_onlyxy']
+    featurized_dir = config['data']['featurized_v3_final_waypoint']
     train_files = glob(os.path.join(featurized_dir, 'training', '*.pt'))
     val_files = glob(os.path.join(featurized_dir, 'validation', '*.pt'))
     
     stats_path = os.path.join(PROJECT_ROOT, 'models', 'normalization_stats.pt')
-    train_dataset = InMemoryDiffusionDataset(train_files, stats_path=stats_path)
-    val_dataset = InMemoryDiffusionDataset(val_files, stats_path=stats_path)
+    pca_path = os.path.join(PROJECT_ROOT, 'models', 'trajectory_pca.pkl') # <-- Add this path
+    latent_stats_path = os.path.join(PROJECT_ROOT, 'models', 'latent_stats.pt') # <-- And this one
+    train_dataset = InMemoryDiffusionDataset(train_files, stats_path=stats_path, pca_path=pca_path, latent_stats_path=latent_stats_path)
+    val_dataset = InMemoryDiffusionDataset(val_files, stats_path=stats_path, pca_path=pca_path, latent_stats_path=latent_stats_path)
     
     train_loader = DataLoader(
         train_dataset, batch_size=train_cfg['batch_size'], num_workers=train_cfg['num_workers'],
@@ -138,7 +140,7 @@ def main(args):
     )
 
     # --- 4. Initialize Model, Optimizer, and Scheduler ---
-    model = ConditionalUNet(config).to(device)
+    model = ConditionalMLPDenoiser(config).to(device) # Was ConditionalUNet
     optimizer = torch.optim.AdamW(model.parameters(), lr=train_cfg['learning_rate'], weight_decay=train_cfg['weight_decay'])
     
     # --- NEW: Instantiate the Scheduler ---

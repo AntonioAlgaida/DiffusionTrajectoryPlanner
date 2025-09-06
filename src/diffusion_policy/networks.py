@@ -106,7 +106,7 @@ class StateEncoder(nn.Module):
     Processes the structured state_dict into a single scene embedding vector
     using dedicated encoders for each entity and a Transformer for fusion.
     """
-    def __init__(self, embed_dim: int, num_attn_heads: int = 4):
+    def __init__(self, embed_dim: int, num_attn_heads: int = 4, goal_dropout_prob: float = 0.0): # <-- Add new argument
         super().__init__()
         
         # --- Define dedicated encoders for each entity type ---
@@ -125,6 +125,9 @@ class StateEncoder(nn.Module):
         # --- The [CLS] token, a learnable parameter ---
         self.cls_token = nn.Parameter(torch.randn(1, 1, embed_dim))
         
+        self.goal_dropout_prob = goal_dropout_prob
+        print(f"StateEncoder initialized with goal_dropout_prob = {self.goal_dropout_prob}")
+        
         # --- Transformer Encoder for fusing all entity embeddings ---
         transformer_layer = nn.TransformerEncoderLayer(
             d_model=embed_dim,
@@ -136,7 +139,7 @@ class StateEncoder(nn.Module):
         )
         self.transformer = nn.TransformerEncoder(transformer_layer, num_layers=2)
 
-    def forward(self, state_dict: Dict[str, torch.Tensor]) -> torch.Tensor:
+    def forward(self, state_dict: Dict[str, torch.Tensor], force_drop_goal: bool = False) -> torch.Tensor: # <-- Add new argument
         # --- 1. Encode each entity independently ---
         # Note the permutation for Conv1d: (B, C, L)
         ego_hist = state_dict['ego_history'].permute(0, 2, 1)
@@ -148,7 +151,18 @@ class StateEncoder(nn.Module):
         
         agent_embeddings = self.agent_encoder(state_dict['agents'])     # (B, 16, embed_dim)
         map_embeddings = self.map_encoder(map_geom)                     # (B, 64, embed_dim)
-        goal_embeddings = self.goal_encoder(state_dict['goal'])         # (B, 5, embed_dim)
+        goal_embeddings = self.goal_encoder(state_dict['goal'])
+
+        # # --- THIS IS THE NEW ABLATION LOGIC ---
+        # if self.training and self.goal_dropout_prob > 0:
+        #     # During training, randomly drop the goal for a fraction of the batch
+        #     # Create a dropout mask of shape (B, 1, 1) to broadcast
+        #     dropout_mask = (torch.rand(goal_embeddings.shape[0], 1, 1, device=goal_embeddings.device) > self.goal_dropout_prob).float()
+        #     goal_embeddings = goal_embeddings * dropout_mask
+        # elif force_drop_goal:
+        #     # At inference time, we can force the goal to be dropped
+        #     goal_embeddings = goal_embeddings * 0.0
+            
         tl_embedding = self.tl_encoder(state_dict['traffic_lights']).unsqueeze(1) # (B, 1, embed_dim)
         
         # --- 2. Build the full sequence of tokens for the Transformer ---
@@ -229,7 +243,7 @@ class ConditionalUNet(nn.Module):
             nn.Linear(time_embed_dim, time_embed_dim), nn.Mish(),
             nn.Linear(time_embed_dim, time_embed_dim)
         )
-        self.state_encoder = StateEncoder(embed_dim=scene_embed_dim)
+        self.state_encoder = StateEncoder(embed_dim=scene_embed_dim, goal_dropout_prob=config['model'].get('goal_dropout_prob', 0.0))
         
         # --- U-Net Architecture ---
         # The input to the U-Net is a sequence of (x, y, heading)
@@ -319,5 +333,65 @@ class ConditionalUNet(nn.Module):
         
         # Transpose back to (B, L, C_traj) to match the noise input
         predicted_noise = x.permute(0, 2, 1)
+        
+        return predicted_noise
+    
+
+
+class ConditionalMLPDenoiser(nn.Module):
+    """
+    A conditional denoiser model implemented as a simple but powerful MLP.
+    This model is designed to operate on low-dimensional latent vectors.
+    """
+    def __init__(self, config: Dict):
+        super().__init__()
+        
+        latent_dim = config['pca']['n_components'] # This is now n_components
+        time_embed_dim = config['model']['time_embed_dim']
+        scene_embed_dim = config['model']['scene_embed_dim']
+        hidden_dims = config['model']['hidden_dims']
+        
+        # Total dimension of the concatenated input vector
+        input_dim = latent_dim + time_embed_dim + scene_embed_dim
+        
+        # --- Instantiate sub-modules (reused from U-Net) ---
+        self.time_encoder = nn.Sequential(
+            SinusoidalTimeEmbedding(time_embed_dim),
+            nn.Linear(time_embed_dim, time_embed_dim), nn.Mish(),
+            nn.Linear(time_embed_dim, time_embed_dim)
+        )
+        self.state_encoder = StateEncoder(embed_dim=scene_embed_dim, goal_dropout_prob=config['model'].get('goal_dropout_prob', 0.0))
+        
+        # --- Core Denoiser MLP ---
+        layers = []
+        current_dim = input_dim
+        for h_dim in hidden_dims:
+            layers.append(nn.Linear(current_dim, h_dim))
+            layers.append(nn.Mish())
+            current_dim = h_dim
+            
+        # Final layer projects back to the latent dimension
+        layers.append(nn.Linear(current_dim, latent_dim))
+        
+        self.denoiser_mlp = nn.Sequential(*layers)
+
+    def forward(
+        self, 
+        noisy_latent: torch.Tensor,
+        timestep: torch.Tensor,
+        state_dict: Dict[str, torch.Tensor],
+        force_drop_goal: bool = False # <-- Add new argument here
+    ) -> torch.Tensor:
+        
+        # --- 1. Prepare Conditioning Vectors ---
+        time_embedding = self.time_encoder(timestep)
+        scene_embedding = self.state_encoder(state_dict, force_drop_goal=force_drop_goal)
+        
+        # --- 2. Concatenate all inputs ---
+        # The input is the noisy latent vector + conditioning
+        model_input = torch.cat([noisy_latent, time_embedding, scene_embedding], dim=1)
+        
+        # --- 3. Pass through MLP to predict noise ---
+        predicted_noise = self.denoiser_mlp(model_input)
         
         return predicted_noise
