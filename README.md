@@ -5,8 +5,8 @@
 </p>
 
 <p align="center">
-  <a href="https://arxiv.org/abs/2602.17586" target="_blank">
-    <img src="https://img.shields.io/badge/ArXiv-2602.17586-b31b1b.svg?style=flat-square" alt="ArXiv Paper">
+  <a href="https://arxiv.org/abs/2509.03658" target="_blank">
+    <img src="https://img.shields.io/badge/ArXiv-2509.03658-b31b1b.svg?style=flat-square" alt="ArXiv Paper">
   </a>
   <a href="http://arxiv.org/licenses/nonexclusive-distrib/1.0/" target="_blank">
     <img src="https://img.shields.io/badge/Paper%20License-arXiv%20Perpetual-b31b1b.svg?style=flat-square" alt="ArXiv Paper License">
